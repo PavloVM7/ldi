@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Pavlo Moisieienko
+
+// Package ldi implements lightweight dependency injection
 package ldi
 
 import (
@@ -7,9 +10,12 @@ import (
 	"sync"
 )
 
+// New creates new Di
 func New() *Di {
 	return NewWithParent(nil)
 }
+
+// NewWithParent creates new Di with parent
 func NewWithParent(parent *Di) *Di {
 	return &Di{
 		providers: newProviders(),
@@ -17,23 +23,46 @@ func NewWithParent(parent *Di) *Di {
 	}
 }
 
+// Di provides dependency injection
 type Di struct {
 	providers providers
 	parent    *Di
 	mu        sync.Mutex
 }
 
-func (d *Di) MustProvide(provide any) *Di {
-	if err := d.Provide(provide); err != nil {
+// MustInvoke calls the provided functions if there is error it will panic
+func (d *Di) MustInvoke(functions ...any) *Di {
+	if err := d.Invoke(functions...); err != nil {
+		//revive:disable
 		log.Fatal(err)
+		//revive:enable
 	}
 	return d
 }
 
-func (d *Di) Provide(anything any) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+// Invoke calls the provided functions
+func (d *Di) Invoke(functions ...any) error {
+	for _, function := range functions {
+		_, err := d.innerInvoke(function)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
+// MustProvide adds a new provider for the provided value if there is error it will panic
+func (d *Di) MustProvide(provide any) *Di {
+	if err := d.Provide(provide); err != nil {
+		//revive:disable
+		log.Fatal(err)
+		//revive:enable
+	}
+	return d
+}
+
+// Provide adds a new provider for the provided value
+func (d *Di) Provide(anything any) error {
 	val := reflect.ValueOf(anything)
 	if val.Kind() == reflect.Func {
 		return d.provideFunction(anything)
@@ -56,6 +85,9 @@ func (d *Di) provideFunction(function any) error {
 	return nil
 }
 func (d *Di) provideFunctionValue(function any, parameterType reflect.Type, parameterIndex int) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	ok, err := d.canAddProvider(parameterType)
 	if err != nil {
 		return err
@@ -67,6 +99,9 @@ func (d *Di) provideFunctionValue(function any, parameterType reflect.Type, para
 }
 
 func (d *Di) provideValue(value reflect.Value) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	valueType := value.Type()
 	ok, err := d.canAddProvider(valueType)
 	if err != nil {
@@ -78,7 +113,7 @@ func (d *Di) provideValue(value reflect.Value) error {
 	return d.providers.addValue(value)
 }
 
-func (d *Di) invoke(function any) ([]reflect.Value, error) {
+func (d *Di) innerInvoke(function any) ([]reflect.Value, error) {
 	var functionType reflect.Type
 	funcValue, ok := function.(reflect.Value)
 	if ok && funcValue.IsValid() {
@@ -94,7 +129,7 @@ func (d *Di) invoke(function any) ([]reflect.Value, error) {
 	for i := 0; i < functionType.NumIn(); i++ {
 		paramValue, err := d.provideParameter(d, functionType.In(i), i)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("couldn't provide parameter for function '%s': %w", functionType, err)
 		}
 		parameterValues = append(parameterValues, paramValue)
 	}
@@ -103,15 +138,16 @@ func (d *Di) invoke(function any) ([]reflect.Value, error) {
 
 func (d *Di) provideParameter(di *Di, parameterType reflect.Type, parameterIndex int) (reflect.Value, error) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	prov, ok := d.providers.getProvider(parameterType)
 	if !ok {
+		d.mu.Unlock()
 		if d.parent != nil {
 			return d.parent.provideParameter(di, parameterType, parameterIndex)
 		}
 		return reflect.Value{}, fmt.Errorf("provider for paramter[%d] of type '%s' not found",
 			parameterIndex, parameterType)
 	}
+	d.mu.Unlock()
 	return prov.provide(di)
 }
 
