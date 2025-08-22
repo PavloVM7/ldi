@@ -1,0 +1,26 @@
+name: Lint
+
+on:
+  pull_request:
+  push:
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'revive.toml'
+
+jobs:
+
+  lint:
+    name: Revive
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v4
+
+    - name: Run Revive Action
+      uses: docker://morphy/revive-action:v2
+      with:
+        config: revive.toml
+        fail-on-any: true
