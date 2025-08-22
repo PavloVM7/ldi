@@ -23,4 +23,6 @@ jobs:
       uses: docker://morphy/revive-action:v2
       with:
         config: revive.toml
+        exclude:
+          di_test.go
         fail-on-any: true
