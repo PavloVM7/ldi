@@ -1,4 +1,6 @@
-// Copyright (c) 2025 Pavlo Moisieienko
+// Copyright (c) 2025 Pavlo Moisieienko. All rights reserved.
+// Use of this source code is governed by the Apache License 2.0
+// license which can be found in the LICENSE file.
 
 package ldi
 
