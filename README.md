@@ -1,2 +1,2 @@
 # ldi
-lightweight dependency injection
+Lightweight dependency injection
