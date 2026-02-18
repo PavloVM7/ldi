@@ -146,7 +146,7 @@ func (d *Di) provideParameter(di *Di, parameterType reflect.Type, parameterIndex
 		if d.parent != nil {
 			return d.parent.provideParameter(di, parameterType, parameterIndex)
 		}
-		return reflect.Value{}, fmt.Errorf("provider for paramter[%d] of type '%s' not found",
+		return reflect.Value{}, fmt.Errorf("provider for parameter[%d] of type '%s' not found",
 			parameterIndex, parameterType)
 	}
 	d.mu.Unlock()

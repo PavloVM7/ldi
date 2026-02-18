@@ -119,7 +119,7 @@ func newValueProvider(value reflect.Value) valueProvider {
 }
 
 func isError(tp reflect.Type) bool {
-	return tp.String() == "error"
+	return tp.Implements(reflect.TypeOf((*error)(nil)).Elem())
 }
 
 func functionCall(fnc reflect.Value, args []reflect.Value) ([]reflect.Value, error) {
@@ -127,6 +127,7 @@ func functionCall(fnc reflect.Value, args []reflect.Value) ([]reflect.Value, err
 	for _, r := range results {
 		if isError(r.Type()) {
 			if err, ok := r.Interface().(error); ok {
+				// if an error occurs when calling a function, we are not interested in other results
 				return nil, err
 			}
 		}
