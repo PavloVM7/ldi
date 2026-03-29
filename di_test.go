@@ -312,6 +312,77 @@ func TestDi_provide_function_nil(t *testing.T) {
 	})
 }
 
+type InterfaceA interface{ DoA() }
+type InterfaceB interface{ DoB() }
+
+type testA struct {
+	b InterfaceB
+}
+
+func (t *testA) DoA() {}
+
+type testB struct {
+	a InterfaceA
+}
+
+func (t *testB) DoB() {}
+
+func TestDi_circular_dependency_detection(t *testing.T) {
+	di := New()
+
+	// Provide function that creates A requiring B
+	err := di.Provide(func(b InterfaceB) InterfaceA {
+		return &testA{b: b}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Provide function that creates B requiring A (circular)
+	err = di.Provide(func(a InterfaceA) InterfaceB {
+		return &testB{a: a}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Try to resolve A - should detect circular dependency
+	err = di.Invoke(func(a InterfaceA) {
+		t.Fatal("should not reach here due to circular dependency")
+	})
+
+	if err == nil {
+		t.Fatal("expected circular dependency error, but got nil")
+	}
+
+	expectedError := "circular dependency detected for type"
+	if !contains(err.Error(), expectedError) {
+		t.Fatalf("expected error containing '%s', but got: %s", expectedError, err.Error())
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) &&
+		(hasPrefix(s, substr) || hasSuffix(s, substr) || containsMiddle(s, substr)))
+}
+
+func hasPrefix(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[0:len(prefix)] == prefix
+}
+
+func hasSuffix(s, suffix string) bool {
+	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
+}
+
+func containsMiddle(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
 func arrayEquals[T comparable](t *testing.T, actual []T, expected []T) {
 	t.Helper()
 	if len(actual) != len(expected) {
