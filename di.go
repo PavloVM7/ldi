@@ -22,6 +22,7 @@ func NewWithParent(parent *Di) *Di {
 	return &Di{
 		providers: newProviders(),
 		parent:    parent,
+		resolving: make(map[reflect.Type]struct{}),
 	}
 }
 
@@ -30,6 +31,8 @@ type Di struct {
 	providers providers
 	parent    *Di
 	mu        sync.Mutex
+	// track in-flight provider resolutions to detect circular dependencies
+	resolving map[reflect.Type]struct{}
 }
 
 // MustInvoke calls the provided functions if there is error it will panic
@@ -157,6 +160,13 @@ func (d *Di) provideParameterAndCheck(di *Di, parameterType reflect.Type, parame
 
 func (d *Di) provideParameter(di *Di, parameterType reflect.Type, parameterIndex int) (reflect.Value, error) {
 	d.mu.Lock()
+
+	// Check for circular dependency
+	if _, resolving := d.resolving[parameterType]; resolving {
+		d.mu.Unlock()
+		return reflect.Value{}, fmt.Errorf("circular dependency detected for type '%s'", parameterType)
+	}
+
 	prov, ok := d.providers.getProvider(parameterType)
 	if !ok {
 		d.mu.Unlock()
@@ -166,8 +176,20 @@ func (d *Di) provideParameter(di *Di, parameterType reflect.Type, parameterIndex
 		return reflect.Value{}, fmt.Errorf("provider for parameter[%d] of type '%s' not found",
 			parameterIndex, parameterType)
 	}
+
+	// Mark this type as being resolved
+	d.resolving[parameterType] = struct{}{}
 	d.mu.Unlock()
-	return prov.provide(di)
+
+	// Provide the value
+	result, err := prov.provide(di)
+
+	// Clean up resolution tracking
+	d.mu.Lock()
+	delete(d.resolving, parameterType)
+	d.mu.Unlock()
+
+	return result, err
 }
 
 func (d *Di) canAddProvider(tp reflect.Type) (bool, error) {
