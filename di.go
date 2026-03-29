@@ -51,6 +51,7 @@ func (d *Di) Invoke(functions ...any) error {
 	for _, function := range functions {
 		_, err := d.innerInvoke(function)
 		if err != nil {
+			d.CleanupResolutionTracking()
 			return err
 		}
 	}
@@ -161,10 +162,8 @@ func (d *Di) provideParameterAndCheck(di *Di, parameterType reflect.Type, parame
 }
 
 func (d *Di) provideParameter(di *Di, parameterType reflect.Type, parameterIndex int) (reflect.Value, error) {
-	// Use read lock for provider lookup
 	d.mu.RLock()
 
-	// Check for circular dependency
 	if _, resolving := d.resolving[parameterType]; resolving {
 		d.mu.RUnlock()
 		return reflect.Value{}, fmt.Errorf("circular dependency detected for type '%s'", parameterType)
@@ -181,26 +180,49 @@ func (d *Di) provideParameter(di *Di, parameterType reflect.Type, parameterIndex
 			parameterIndex, parameterType)
 	}
 
-	// Use write lock for resolution tracking
 	d.mu.Lock()
 	// Double-check after acquiring write lock
 	if _, resolving := d.resolving[parameterType]; resolving {
 		d.mu.Unlock()
 		return reflect.Value{}, fmt.Errorf("circular dependency detected for type '%s'", parameterType)
 	}
-	// Mark this type as being resolved
 	d.resolving[parameterType] = struct{}{}
 	d.mu.Unlock()
 
-	// Provide the value (outside of lock to reduce contention)
 	result, err := prov.provide(di)
 
-	// Clean up resolution tracking
+	// Clean up resolution tracking (always clean up, even on error)
 	d.mu.Lock()
 	delete(d.resolving, parameterType)
 	d.mu.Unlock()
 
 	return result, err
+}
+
+func (d *Di) cleanupResolutionTrackingWithParents() {
+	for d.parent != nil {
+		d.parent.cleanupResolutionTrackingWithParents()
+	}
+	d.CleanupResolutionTracking()
+}
+
+// Clear removes all providers and resets the DI container state
+func (d *Di) Clear() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	d.providers = make(providers)
+	d.resolving = make(map[reflect.Type]struct{})
+}
+
+// CleanupResolutionTracking removes all resolution tracking entries to prevent memory leaks.
+// This should be called after error scenarios where tracking might not be cleaned up.
+func (d *Di) CleanupResolutionTracking() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Clear all in-flight resolutions
+	d.resolving = make(map[reflect.Type]struct{})
 }
 
 func (d *Di) canAddProvider(tp reflect.Type) (bool, error) {

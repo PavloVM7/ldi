@@ -1,5 +1,5 @@
 revive:
-	revive -config ./revive.toml -formatter friendly -exclude di_test.go ./...
+	revive -config ./revive.toml -formatter friendly -exclude di_test.go -exclude memory_leak_test.go ./...
 
 test:
 	go test ./... -v -race -cover
