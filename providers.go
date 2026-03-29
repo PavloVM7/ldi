@@ -46,6 +46,16 @@ func (ps providers) addProvider(tp reflect.Type, prov iProvider) error {
 	return nil
 }
 
+func (ps providers) setFunctionProvidersValues(values []reflect.Value) {
+	for i := 0; i < len(values); i++ {
+		if pr, ok := ps.getProvider(values[i].Type()); ok {
+			if prf, okf := pr.(*functionProvider); okf {
+				prf.value = values[i]
+			}
+		}
+	}
+}
+
 func (ps providers) Len() int {
 	return len(ps)
 }
@@ -86,11 +96,12 @@ func newFunctionProvider(function any, parameterIndex int) functionProvider {
 		//revive:disable
 		pf := p.(*functionProvider)
 		//revive:enable
+
 		values, err := di.innerInvoke(pf.function)
 		if err != nil {
 			return reflect.Value{}, err
 		}
-		pf.value = values[pf.parameterIndex]
+		di.providers.setFunctionProvidersValues(values)
 		return p.getValue(), nil
 	}
 	return result
