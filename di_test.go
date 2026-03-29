@@ -7,6 +7,7 @@ package ldi
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -359,6 +360,330 @@ func TestDi_circular_dependency_detection(t *testing.T) {
 	expectedError := "circular dependency detected for type"
 	if !strings.Contains(err.Error(), expectedError) {
 		t.Fatalf("expected error containing '%s', but got: %s", expectedError, err.Error())
+	}
+}
+
+// TestDi_concurrent_reads tests multiple goroutines reading from the same DI container
+func TestDi_concurrent_reads(t *testing.T) {
+	di := New()
+
+	// Provide shared dependencies
+	err := di.Provide("shared string")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = di.Provide(42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = di.Provide(3.14)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Test concurrent reads
+	const numGoroutines = 100
+	const numInvocations = 10
+
+	var wg sync.WaitGroup
+	errors := make(chan error, numGoroutines*numInvocations)
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < numInvocations; j++ {
+				err := di.Invoke(func(s string, num int, pi float64) {
+					// Verify values are correct
+					if s != "shared string" {
+						errors <- fmt.Errorf("goroutine %d, invocation %d: expected 'shared string', got '%s'", id, j, s)
+						return
+					}
+					if num != 42 {
+						errors <- fmt.Errorf("goroutine %d, invocation %d: expected 42, got %d", id, j, num)
+						return
+					}
+					if pi != 3.14 {
+						errors <- fmt.Errorf("goroutine %d, invocation %d: expected 3.14, got %f", id, j, pi)
+						return
+					}
+				})
+				if err != nil {
+					errors <- fmt.Errorf("goroutine %d, invocation %d: %v", id, j, err)
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	// Check for any errors
+	for err := range errors {
+		t.Error(err)
+	}
+}
+
+// TestDi_concurrent_mixed_operations tests concurrent read and write operations
+func TestDi_concurrent_mixed_operations(t *testing.T) {
+	di := New()
+
+	// Pre-provide some base dependencies
+	err := di.Provide("base string")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = di.Provide(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const numGoroutines = 50
+	var wg sync.WaitGroup
+	errors := make(chan error, numGoroutines*2)
+
+	// Half goroutines will provide new values
+	for i := 0; i < numGoroutines/2; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			// Each goroutine provides a unique type to avoid conflicts
+			type uniqueType struct{ id int }
+			err := di.Provide(&uniqueType{id: id})
+			if err != nil {
+				errors <- fmt.Errorf("provide goroutine %d: %v", id, err)
+			}
+		}(i)
+	}
+
+	// Half goroutines will invoke functions
+	for i := numGoroutines / 2; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			err := di.Invoke(func(s string, num int) {
+				// Verify base values
+				if s != "base string" {
+					errors <- fmt.Errorf("invoke goroutine %d: expected 'base string', got '%s'", id, s)
+					return
+				}
+				if num != 100 {
+					errors <- fmt.Errorf("invoke goroutine %d: expected 100, got %d", id, num)
+					return
+				}
+			})
+			if err != nil {
+				errors <- fmt.Errorf("invoke goroutine %d: %v", id, err)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	// Check for any errors
+	for err := range errors {
+		t.Error(err)
+	}
+}
+
+// TestDi_concurrent_function_providers tests concurrent function provider execution
+func TestDi_concurrent_function_providers(t *testing.T) {
+	di := New()
+
+	// Provide function providers
+	err := di.Provide(func() string {
+		return "dynamic string"
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = di.Provide(func() int {
+		return 999
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const numGoroutines = 100
+	var wg sync.WaitGroup
+	errors := make(chan error, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			err := di.Invoke(func(s string, num int) {
+				// Verify function provider results
+				if s != "dynamic string" {
+					errors <- fmt.Errorf("goroutine %d: expected 'dynamic string', got '%s'", id, s)
+					return
+				}
+				if num != 999 {
+					errors <- fmt.Errorf("goroutine %d: expected 999, got %d", id, num)
+					return
+				}
+			})
+			if err != nil {
+				errors <- fmt.Errorf("goroutine %d: %v", id, err)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	// Check for any errors
+	for err := range errors {
+		t.Error(err)
+	}
+}
+
+// TestDi_concurrent_parent_child tests concurrent access to parent-child DI containers
+func TestDi_concurrent_parent_child(t *testing.T) {
+	parent := New()
+
+	// Provide parent dependencies
+	err := parent.Provide("parent string")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = parent.Provide(200)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create child container
+	child := NewWithParent(parent)
+
+	// Provide child-specific dependency
+	err = child.Provide("child string")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const numGoroutines = 100
+	var wg sync.WaitGroup
+	errors := make(chan error, numGoroutines*2)
+
+	// Half goroutines use parent container
+	for i := 0; i < numGoroutines/2; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			err := parent.Invoke(func(s string, num int) {
+				if s != "parent string" {
+					errors <- fmt.Errorf("parent goroutine %d: expected 'parent string', got '%s'", id, s)
+					return
+				}
+				if num != 200 {
+					errors <- fmt.Errorf("parent goroutine %d: expected 200, got %d", id, num)
+					return
+				}
+			})
+			if err != nil {
+				errors <- fmt.Errorf("parent goroutine %d: %v", id, err)
+			}
+		}(i)
+	}
+
+	// Half goroutines use child container
+	for i := numGoroutines / 2; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			err := child.Invoke(func(s string, num int) {
+				// Child should resolve to parent's string provider
+				if s != "parent string" {
+					errors <- fmt.Errorf("child goroutine %d: expected 'parent string', got '%s'", id, s)
+					return
+				}
+				if num != 200 {
+					errors <- fmt.Errorf("child goroutine %d: expected 200, got %d", id, num)
+					return
+				}
+			})
+			if err != nil {
+				errors <- fmt.Errorf("child goroutine %d: %v", id, err)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	// Check for any errors
+	for err := range errors {
+		t.Error(err)
+	}
+}
+
+// TestDi_stress_test_concurrent_access is a stress test for high-concurrency scenarios
+func TestDi_stress_test_concurrent_access(t *testing.T) {
+	di := New()
+
+	// Provide various types of dependencies
+	err := di.Provide("stress test string")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = di.Provide(12345)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = di.Provide(3.14159)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = di.Provide(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const numGoroutines = 500
+	const numInvocations = 20
+
+	var wg sync.WaitGroup
+	errors := make(chan error, numGoroutines*numInvocations)
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < numInvocations; j++ {
+				err := di.Invoke(func(s string, num int, pi float64, flag bool) {
+					// Verify all values
+					if s != "stress test string" {
+						errors <- fmt.Errorf("goroutine %d, invocation %d: expected 'stress test string', got '%s'", id, j, s)
+						return
+					}
+					if num != 12345 {
+						errors <- fmt.Errorf("goroutine %d, invocation %d: expected 12345, got %d", id, j, num)
+						return
+					}
+					if pi != 3.14159 {
+						errors <- fmt.Errorf("goroutine %d, invocation %d: expected 3.14159, got %f", id, j, pi)
+						return
+					}
+					if !flag {
+						errors <- fmt.Errorf("goroutine %d, invocation %d: expected true, got %v", id, j, flag)
+						return
+					}
+				})
+				if err != nil {
+					errors <- fmt.Errorf("goroutine %d, invocation %d: %v", id, j, err)
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	// Check for any errors
+	for err := range errors {
+		t.Error(err)
 	}
 }
 
