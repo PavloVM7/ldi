@@ -108,6 +108,7 @@ func newFunctionProvider(function any, parameterIndex int, providers providers) 
 			return reflect.Value{}, err
 		}
 
+		// set function result values to providers to prevent the function from being called again
 		if !pf.providers.setFunctionProvidersValues(values) {
 			return reflect.Value{}, fmt.Errorf("values of function '%s' did not set", pf.function)
 		}
