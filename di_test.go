@@ -166,6 +166,51 @@ func TestDi_Provide_function(t *testing.T) {
 	}
 }
 
+func TestDi_function_many_results(t *testing.T) {
+	expectedInt := []int{1, 2, 3}
+	expectedStr := []string{"a", "b", "c"}
+	count := 0
+	f := func() ([]int, []string) {
+		count++
+		return expectedInt, expectedStr
+	}
+	var (
+		actualInt1 []int
+		actualStr1 []string
+		actualInt2 []int
+		actualStr2 []string
+	)
+	New().MustProvide(f).
+		MustInvoke(func(ints []int, strings []string) {
+			actualInt1 = ints
+			actualStr1 = strings
+		}).MustInvoke(func(ints []int) {
+		actualInt2 = ints
+	}).MustInvoke(func(strings []string) {
+		actualStr2 = strings
+	})
+
+	arrayEquals(t, actualInt1, expectedInt)
+	arrayEquals(t, actualStr1, expectedStr)
+	arrayEquals(t, actualInt2, expectedInt)
+	arrayEquals(t, actualStr2, expectedStr)
+	if count != 1 {
+		t.Fatal("expected count to be 1, but got:", count)
+	}
+}
+
+func arrayEquals[T comparable](t *testing.T, actual []T, expected []T) {
+	t.Helper()
+	if len(actual) != len(expected) {
+		t.Fatal("expected array length to be equal", len(expected), "!=", len(actual))
+	}
+	for i := 0; i < len(actual); i++ {
+		if actual[i] != expected[i] {
+			t.Fatal("expected array value to be equal", expected[i], "!=", actual[i])
+		}
+	}
+}
+
 type ITest interface {
 	GetString() string
 }
