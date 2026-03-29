@@ -30,7 +30,8 @@ func NewWithParent(parent *Di) *Di {
 type Di struct {
 	providers providers
 	parent    *Di
-	mu        sync.Mutex
+	// Use RWMutex for better read/write performance
+	mu sync.RWMutex
 	// track in-flight provider resolutions to detect circular dependencies
 	resolving map[reflect.Type]struct{}
 }
@@ -136,6 +137,7 @@ func (d *Di) innerInvoke(function any) ([]reflect.Value, error) {
 	if functionType == nil || functionType.Kind() != reflect.Func {
 		return nil, fmt.Errorf("can't invoke not a function '%s'", functionType)
 	}
+
 	parameterValues := make([]reflect.Value, 0, functionType.NumIn())
 	for i := 0; i < functionType.NumIn(); i++ {
 		paramValue, err := d.provideParameterAndCheck(d, functionType.In(i), i)
@@ -159,17 +161,19 @@ func (d *Di) provideParameterAndCheck(di *Di, parameterType reflect.Type, parame
 }
 
 func (d *Di) provideParameter(di *Di, parameterType reflect.Type, parameterIndex int) (reflect.Value, error) {
-	d.mu.Lock()
+	// Use read lock for provider lookup
+	d.mu.RLock()
 
 	// Check for circular dependency
 	if _, resolving := d.resolving[parameterType]; resolving {
-		d.mu.Unlock()
+		d.mu.RUnlock()
 		return reflect.Value{}, fmt.Errorf("circular dependency detected for type '%s'", parameterType)
 	}
 
 	prov, ok := d.providers.getProvider(parameterType)
+	d.mu.RUnlock()
+
 	if !ok {
-		d.mu.Unlock()
 		if d.parent != nil {
 			return d.parent.provideParameter(di, parameterType, parameterIndex)
 		}
@@ -177,11 +181,18 @@ func (d *Di) provideParameter(di *Di, parameterType reflect.Type, parameterIndex
 			parameterIndex, parameterType)
 	}
 
+	// Use write lock for resolution tracking
+	d.mu.Lock()
+	// Double-check after acquiring write lock
+	if _, resolving := d.resolving[parameterType]; resolving {
+		d.mu.Unlock()
+		return reflect.Value{}, fmt.Errorf("circular dependency detected for type '%s'", parameterType)
+	}
 	// Mark this type as being resolved
 	d.resolving[parameterType] = struct{}{}
 	d.mu.Unlock()
 
-	// Provide the value
+	// Provide the value (outside of lock to reduce contention)
 	result, err := prov.provide(di)
 
 	// Clean up resolution tracking

@@ -6,6 +6,7 @@ package ldi
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -356,31 +357,9 @@ func TestDi_circular_dependency_detection(t *testing.T) {
 	}
 
 	expectedError := "circular dependency detected for type"
-	if !contains(err.Error(), expectedError) {
+	if !strings.Contains(err.Error(), expectedError) {
 		t.Fatalf("expected error containing '%s', but got: %s", expectedError, err.Error())
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) &&
-		(hasPrefix(s, substr) || hasSuffix(s, substr) || containsMiddle(s, substr)))
-}
-
-func hasPrefix(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[0:len(prefix)] == prefix
-}
-
-func hasSuffix(s, suffix string) bool {
-	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
-}
-
-func containsMiddle(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func arrayEquals[T comparable](t *testing.T, actual []T, expected []T) {
