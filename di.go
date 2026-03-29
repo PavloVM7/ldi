@@ -133,6 +133,9 @@ func (d *Di) innerInvoke(function any) ([]reflect.Value, error) {
 		if err != nil {
 			return nil, fmt.Errorf("couldn't provide parameter for function '%s': %w", functionType, err)
 		}
+		if paramValue.Kind() == reflect.Invalid {
+			return nil, fmt.Errorf("function '%s' parameter %d of type '%s' not found", functionType, i, functionType.In(i))
+		}
 		parameterValues = append(parameterValues, paramValue)
 	}
 	return functionCall(funcValue, parameterValues)
@@ -161,4 +164,12 @@ func (d *Di) canAddProvider(tp reflect.Type) (bool, error) {
 		return false, fmt.Errorf("provider for type '%s' already exists", tp)
 	}
 	return true, nil
+}
+
+func (d *Di) setFunctionProvidersValues(values []reflect.Value) bool {
+	result := d.providers.setFunctionProvidersValues(values)
+	if !result && d.parent != nil {
+		result = d.parent.setFunctionProvidersValues(values)
+	}
+	return result
 }

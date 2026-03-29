@@ -119,6 +119,7 @@ func TestDi_Provide_function_error_not_provided(t *testing.T) {
 		t.Fatalf("expected 0 provider, but got %d", di.providers.Len())
 	}
 }
+
 func TestDi_Provide_function_no_return_value(t *testing.T) {
 	di := New()
 	err := di.Provide(func1)
@@ -166,6 +167,80 @@ func TestDi_Provide_function(t *testing.T) {
 	}
 }
 
+func TestDi_MustProvide_nil_nil(t *testing.T) {
+	f := func() ([]int, []string) {
+		return nil, nil
+	}
+
+	di := New()
+	err := di.MustProvide(f).Invoke(func(ints []int, strs []string) {
+		if ints != nil {
+			t.Fatalf("expected nil, but got %v", ints)
+		}
+		if strs != nil {
+			t.Fatalf("expected nil, but got %v", strs)
+		}
+	})
+	if err != nil {
+		t.Fatalf("expected nil, but got %v", err)
+	}
+}
+
+func TestDi_MustInvoke_nil_slice(t *testing.T) {
+	f := func() ([]int, []string) {
+		return nil, nil
+	}
+	di := New().MustProvide(f)
+	err := di.Invoke(func(ints []int) {
+		if ints != nil {
+			t.Fatalf("expected nil, but got %v", ints)
+		}
+	})
+	if err != nil {
+		t.Fatalf("expected nil, but got %v", err)
+	}
+}
+
+func TestDi_function_many_results_parent(t *testing.T) {
+	expectedInt := []int{1, 2, 3}
+	expectedStr := []string{"a", "b", "c"}
+	count := 0
+	f := func() ([]int, []string) {
+		count++
+		return expectedInt, expectedStr
+	}
+	var (
+		actualInt1 []int
+		actualStr1 []string
+		actualInt2 []int
+		actualStr2 []string
+	)
+
+	parent := New().MustProvide(f)
+	di := NewWithParent(parent).
+		MustInvoke(func(ints []int, strings []string) {
+			actualInt1 = ints
+			actualStr1 = strings
+		}).
+		MustInvoke(func(ints []int) {
+			actualInt2 = ints
+		}).MustInvoke(func(strings []string) {
+		actualStr2 = strings
+	})
+	if di == nil {
+		t.Fatal("di expected non nil, but got nil")
+	}
+	if di.parent == nil {
+		t.Fatal("parent expected non nil, but got nil")
+	}
+	arrayEquals(t, actualInt1, expectedInt)
+	arrayEquals(t, actualStr1, expectedStr)
+	arrayEquals(t, actualInt2, expectedInt)
+	arrayEquals(t, actualStr2, expectedStr)
+	if count != 1 {
+		t.Fatal("expected count to be 1, but got:", count)
+	}
+}
 func TestDi_function_many_results(t *testing.T) {
 	expectedInt := []int{1, 2, 3}
 	expectedStr := []string{"a", "b", "c"}
@@ -184,9 +259,10 @@ func TestDi_function_many_results(t *testing.T) {
 		MustInvoke(func(ints []int, strings []string) {
 			actualInt1 = ints
 			actualStr1 = strings
-		}).MustInvoke(func(ints []int) {
-		actualInt2 = ints
-	}).MustInvoke(func(strings []string) {
+		}).
+		MustInvoke(func(ints []int) {
+			actualInt2 = ints
+		}).MustInvoke(func(strings []string) {
 		actualStr2 = strings
 	})
 

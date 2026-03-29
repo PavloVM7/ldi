@@ -46,14 +46,17 @@ func (ps providers) addProvider(tp reflect.Type, prov iProvider) error {
 	return nil
 }
 
-func (ps providers) setFunctionProvidersValues(values []reflect.Value) {
+func (ps providers) setFunctionProvidersValues(values []reflect.Value) bool {
+	result := false
 	for i := 0; i < len(values); i++ {
 		if pr, ok := ps.getProvider(values[i].Type()); ok {
 			if prf, okf := pr.(*functionProvider); okf {
+				result = true
 				prf.value = values[i]
 			}
 		}
 	}
+	return result
 }
 
 func (ps providers) Len() int {
@@ -101,7 +104,10 @@ func newFunctionProvider(function any, parameterIndex int) functionProvider {
 		if err != nil {
 			return reflect.Value{}, err
 		}
-		di.providers.setFunctionProvidersValues(values)
+		if !di.setFunctionProvidersValues(values) {
+			return reflect.Value{}, fmt.Errorf("function '%s' parameter %d of type '%s' did not set",
+				pf.function, pf.parameterIndex, pf.function)
+		}
 		return p.getValue(), nil
 	}
 	return result
