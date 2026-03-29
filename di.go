@@ -66,7 +66,13 @@ func (d *Di) MustProvide(provide any) *Di {
 // Provide adds a new provider for the provided value
 func (d *Di) Provide(anything any) error {
 	val := reflect.ValueOf(anything)
+	if val.Kind() == reflect.Invalid {
+		return fmt.Errorf("can't provide invalid value '%v'", anything)
+	}
 	if val.Kind() == reflect.Func {
+		if val.IsNil() {
+			return fmt.Errorf("can't provide function: '%v', type: '%v'", anything, val.Type())
+		}
 		return d.provideFunction(anything)
 	}
 	return d.provideValue(val)
@@ -129,13 +135,24 @@ func (d *Di) innerInvoke(function any) ([]reflect.Value, error) {
 	}
 	parameterValues := make([]reflect.Value, 0, functionType.NumIn())
 	for i := 0; i < functionType.NumIn(); i++ {
-		paramValue, err := d.provideParameter(d, functionType.In(i), i)
+		paramValue, err := d.provideParameterAndCheck(d, functionType.In(i), i)
 		if err != nil {
-			return nil, fmt.Errorf("couldn't provide parameter for function '%s': %w", functionType, err)
+			return nil, fmt.Errorf("function '%s' %w", functionType, err)
 		}
 		parameterValues = append(parameterValues, paramValue)
 	}
 	return functionCall(funcValue, parameterValues)
+}
+
+func (d *Di) provideParameterAndCheck(di *Di, parameterType reflect.Type, parameterIndex int) (reflect.Value, error) {
+	paramValue, err := d.provideParameter(di, parameterType, parameterIndex)
+	if err != nil {
+		return reflect.Value{}, fmt.Errorf("couldn't provide parameter: %w", err)
+	}
+	if paramValue.Kind() == reflect.Invalid {
+		return paramValue, fmt.Errorf("parameter %d of type '%s' not found", parameterIndex, parameterType)
+	}
+	return paramValue, nil
 }
 
 func (d *Di) provideParameter(di *Di, parameterType reflect.Type, parameterIndex int) (reflect.Value, error) {
