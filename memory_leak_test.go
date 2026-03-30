@@ -5,6 +5,7 @@
 package ldi
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -105,22 +106,7 @@ func TestDi_clear_functionality(t *testing.T) {
 
 	// Check for expected error pattern
 	expectedError := "provider for parameter[0] of type 'string' not found"
-	if !containsSubstring(err.Error(), expectedError) {
+	if !strings.Contains(err.Error(), expectedError) {
 		t.Fatalf("expected error containing '%s', but got: %s", expectedError, err.Error())
 	}
-}
-
-// Helper function to check if error contains substring
-func containsSubstring(s, substr string) bool {
-	return len(s) >= len(substr) && findSubstring(s, substr) >= 0
-}
-
-// Simple substring finder
-func findSubstring(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
 }
