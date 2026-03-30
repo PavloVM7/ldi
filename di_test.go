@@ -5,6 +5,8 @@
 package ldi
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -119,6 +121,7 @@ func TestDi_Provide_function_error_not_provided(t *testing.T) {
 		t.Fatalf("expected 0 provider, but got %d", di.providers.Len())
 	}
 }
+
 func TestDi_Provide_function_no_return_value(t *testing.T) {
 	di := New()
 	err := di.Provide(func1)
@@ -166,6 +169,80 @@ func TestDi_Provide_function(t *testing.T) {
 	}
 }
 
+func TestDi_MustProvide_nil_nil(t *testing.T) {
+	f := func() ([]int, []string) {
+		return nil, nil
+	}
+
+	di := New()
+	err := di.MustProvide(f).Invoke(func(ints []int, strs []string) {
+		if ints != nil {
+			t.Fatalf("expected nil, but got %v", ints)
+		}
+		if strs != nil {
+			t.Fatalf("expected nil, but got %v", strs)
+		}
+	})
+	if err != nil {
+		t.Fatalf("expected nil, but got %v", err)
+	}
+}
+
+func TestDi_MustInvoke_nil_slice(t *testing.T) {
+	f := func() ([]int, []string) {
+		return nil, nil
+	}
+	di := New().MustProvide(f)
+	err := di.Invoke(func(ints []int) {
+		if ints != nil {
+			t.Fatalf("expected nil, but got %v", ints)
+		}
+	})
+	if err != nil {
+		t.Fatalf("expected nil, but got %v", err)
+	}
+}
+
+func TestDi_function_many_results_parent(t *testing.T) {
+	expectedInt := []int{1, 2, 3}
+	expectedStr := []string{"a", "b", "c"}
+	count := 0
+	f := func() ([]int, []string) {
+		count++
+		return expectedInt, expectedStr
+	}
+	var (
+		actualInt1 []int
+		actualStr1 []string
+		actualInt2 []int
+		actualStr2 []string
+	)
+
+	parent := New().MustProvide(f)
+	di := NewWithParent(parent).
+		MustInvoke(func(ints []int, strings []string) {
+			actualInt1 = ints
+			actualStr1 = strings
+		}).
+		MustInvoke(func(ints []int) {
+			actualInt2 = ints
+		}).MustInvoke(func(strings []string) {
+		actualStr2 = strings
+	})
+	if di == nil {
+		t.Fatal("di expected non nil, but got nil")
+	}
+	if di.parent == nil {
+		t.Fatal("parent expected non nil, but got nil")
+	}
+	arrayEquals(t, actualInt1, expectedInt)
+	arrayEquals(t, actualStr1, expectedStr)
+	arrayEquals(t, actualInt2, expectedInt)
+	arrayEquals(t, actualStr2, expectedStr)
+	if count != 1 {
+		t.Fatal("expected count to be 1, but got:", count)
+	}
+}
 func TestDi_function_many_results(t *testing.T) {
 	expectedInt := []int{1, 2, 3}
 	expectedStr := []string{"a", "b", "c"}
@@ -184,9 +261,10 @@ func TestDi_function_many_results(t *testing.T) {
 		MustInvoke(func(ints []int, strings []string) {
 			actualInt1 = ints
 			actualStr1 = strings
-		}).MustInvoke(func(ints []int) {
-		actualInt2 = ints
-	}).MustInvoke(func(strings []string) {
+		}).
+		MustInvoke(func(ints []int) {
+			actualInt2 = ints
+		}).MustInvoke(func(strings []string) {
 		actualStr2 = strings
 	})
 
@@ -196,6 +274,91 @@ func TestDi_function_many_results(t *testing.T) {
 	arrayEquals(t, actualStr2, expectedStr)
 	if count != 1 {
 		t.Fatal("expected count to be 1, but got:", count)
+	}
+}
+
+func TestDi_no_providers(t *testing.T) {
+	parent := New()
+	di := NewWithParent(parent).MustProvide(GetITest).MustProvide("some string")
+	err := di.Invoke(func(iTest ITest) error {
+		if iTest == nil {
+			return fmt.Errorf("expected non nil, but got nil")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pln := di.parent.providers.Len()
+	if pln != 0 {
+		t.Fatalf("expected 0 parent providers, but got %d", pln)
+	}
+}
+
+func TestDi_provide_function_nil(t *testing.T) {
+	di := New()
+	t.Run("provide nil", func(t *testing.T) {
+		err := di.Provide(nil)
+		t.Log("err:", err)
+		if err == nil {
+			t.Fatal("expected error, but got nil")
+		}
+	})
+	t.Run("provide function nil", func(t *testing.T) {
+		err := di.Provide((func() []int)(nil))
+		t.Log("err:", err)
+		if err == nil {
+			t.Fatal("expected error, but got nil")
+		}
+	})
+}
+
+type InterfaceA interface{ DoA() }
+type InterfaceB interface{ DoB() }
+
+type testA struct {
+	b InterfaceB
+}
+
+func (t *testA) DoA() {}
+
+type testB struct {
+	a InterfaceA
+}
+
+func (t *testB) DoB() {}
+
+func TestDi_circular_dependency_detection(t *testing.T) {
+	di := New()
+
+	// Provide function that creates A requiring B
+	err := di.Provide(func(b InterfaceB) InterfaceA {
+		return &testA{b: b}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Provide function that creates B requiring A (circular)
+	err = di.Provide(func(a InterfaceA) InterfaceB {
+		return &testB{a: a}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Try to resolve A - should detect circular dependency
+	err = di.Invoke(func(a InterfaceA) {
+		t.Fatal("should not reach here due to circular dependency")
+	})
+
+	if err == nil {
+		t.Fatal("expected circular dependency error, but got nil")
+	}
+
+	expectedError := "circular dependency detected for type"
+	if !strings.Contains(err.Error(), expectedError) {
+		t.Fatalf("expected error containing '%s', but got: %s", expectedError, err.Error())
 	}
 }
 

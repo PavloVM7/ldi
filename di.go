@@ -22,6 +22,7 @@ func NewWithParent(parent *Di) *Di {
 	return &Di{
 		providers: newProviders(),
 		parent:    parent,
+		resolving: make(map[reflect.Type]struct{}),
 	}
 }
 
@@ -29,7 +30,10 @@ func NewWithParent(parent *Di) *Di {
 type Di struct {
 	providers providers
 	parent    *Di
-	mu        sync.Mutex
+	// Use RWMutex for better read/write performance
+	mu sync.RWMutex
+	// track in-flight provider resolutions to detect circular dependencies
+	resolving map[reflect.Type]struct{}
 }
 
 // MustInvoke calls the provided functions if there is error it will panic
@@ -47,6 +51,7 @@ func (d *Di) Invoke(functions ...any) error {
 	for _, function := range functions {
 		_, err := d.innerInvoke(function)
 		if err != nil {
+			d.CleanupResolutionTracking()
 			return err
 		}
 	}
@@ -66,7 +71,13 @@ func (d *Di) MustProvide(provide any) *Di {
 // Provide adds a new provider for the provided value
 func (d *Di) Provide(anything any) error {
 	val := reflect.ValueOf(anything)
+	if val.Kind() == reflect.Invalid {
+		return fmt.Errorf("can't provide invalid value '%v'", anything)
+	}
 	if val.Kind() == reflect.Func {
+		if val.IsNil() {
+			return fmt.Errorf("can't provide function: '%v', type: '%v'", anything, val.Type())
+		}
 		return d.provideFunction(anything)
 	}
 	return d.provideValue(val)
@@ -127,30 +138,91 @@ func (d *Di) innerInvoke(function any) ([]reflect.Value, error) {
 	if functionType == nil || functionType.Kind() != reflect.Func {
 		return nil, fmt.Errorf("can't invoke not a function '%s'", functionType)
 	}
+
 	parameterValues := make([]reflect.Value, 0, functionType.NumIn())
 	for i := 0; i < functionType.NumIn(); i++ {
-		paramValue, err := d.provideParameter(d, functionType.In(i), i)
+		paramValue, err := d.provideParameterAndCheck(d, functionType.In(i), i)
 		if err != nil {
-			return nil, fmt.Errorf("couldn't provide parameter for function '%s': %w", functionType, err)
+			return nil, fmt.Errorf("function '%s' %w", functionType, err)
 		}
 		parameterValues = append(parameterValues, paramValue)
 	}
 	return functionCall(funcValue, parameterValues)
 }
 
+func (d *Di) provideParameterAndCheck(di *Di, parameterType reflect.Type, parameterIndex int) (reflect.Value, error) {
+	paramValue, err := d.provideParameter(di, parameterType, parameterIndex)
+	if err != nil {
+		return reflect.Value{}, fmt.Errorf("couldn't provide parameter: %w", err)
+	}
+	if paramValue.Kind() == reflect.Invalid {
+		return paramValue, fmt.Errorf("parameter %d of type '%s' not found", parameterIndex, parameterType)
+	}
+	return paramValue, nil
+}
+
 func (d *Di) provideParameter(di *Di, parameterType reflect.Type, parameterIndex int) (reflect.Value, error) {
-	d.mu.Lock()
+	d.mu.RLock()
+
+	if _, resolving := d.resolving[parameterType]; resolving {
+		d.mu.RUnlock()
+		return reflect.Value{}, fmt.Errorf("circular dependency detected for type '%s'", parameterType)
+	}
+
 	prov, ok := d.providers.getProvider(parameterType)
+	d.mu.RUnlock()
+
 	if !ok {
-		d.mu.Unlock()
 		if d.parent != nil {
 			return d.parent.provideParameter(di, parameterType, parameterIndex)
 		}
 		return reflect.Value{}, fmt.Errorf("provider for parameter[%d] of type '%s' not found",
 			parameterIndex, parameterType)
 	}
+
+	d.mu.Lock()
+	// Double-check after acquiring write lock
+	if _, resolving := d.resolving[parameterType]; resolving {
+		d.mu.Unlock()
+		return reflect.Value{}, fmt.Errorf("circular dependency detected for type '%s'", parameterType)
+	}
+	d.resolving[parameterType] = struct{}{}
 	d.mu.Unlock()
-	return prov.provide(di)
+
+	result, err := prov.provide(di)
+
+	// Clean up resolution tracking (always clean up, even on error)
+	d.mu.Lock()
+	delete(d.resolving, parameterType)
+	d.mu.Unlock()
+
+	return result, err
+}
+
+func (d *Di) cleanupResolutionTrackingWithParents() {
+	for d.parent != nil {
+		d.parent.cleanupResolutionTrackingWithParents()
+	}
+	d.CleanupResolutionTracking()
+}
+
+// Clear removes all providers and resets the DI container state
+func (d *Di) Clear() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	d.providers = make(providers)
+	d.resolving = make(map[reflect.Type]struct{})
+}
+
+// CleanupResolutionTracking removes all resolution tracking entries to prevent memory leaks.
+// This should be called after error scenarios where tracking might not be cleaned up.
+func (d *Di) CleanupResolutionTracking() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Clear all in-flight resolutions
+	d.resolving = make(map[reflect.Type]struct{})
 }
 
 func (d *Di) canAddProvider(tp reflect.Type) (bool, error) {

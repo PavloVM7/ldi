@@ -29,7 +29,7 @@ func (ps providers) getProvider(tp reflect.Type) (iProvider, bool) {
 }
 
 func (ps providers) addFunction(function any, parameterType reflect.Type, parameterIndex int) error {
-	prov := newFunctionProvider(function, parameterIndex)
+	prov := newFunctionProvider(function, parameterIndex, ps)
 	return ps.addProvider(parameterType, &prov)
 }
 
@@ -46,14 +46,17 @@ func (ps providers) addProvider(tp reflect.Type, prov iProvider) error {
 	return nil
 }
 
-func (ps providers) setFunctionProvidersValues(values []reflect.Value) {
+func (ps providers) setFunctionProvidersValues(values []reflect.Value) bool {
+	result := false
 	for i := 0; i < len(values); i++ {
 		if pr, ok := ps.getProvider(values[i].Type()); ok {
 			if prf, okf := pr.(*functionProvider); okf {
+				result = true
 				prf.value = values[i]
 			}
 		}
 	}
+	return result
 }
 
 func (ps providers) Len() int {
@@ -61,15 +64,17 @@ func (ps providers) Len() int {
 }
 
 func newProviders() providers {
-	//revive:disable
-	return make(providers, 2)
-	//revive:enable
+	// initial value of the number of providers,
+	// there is no point in creating a list of providers without the providers themselves
+	const initialValue = 1
+	return make(providers, initialValue)
 }
 
 type functionProvider struct {
 	valueProvider
 	function       any
 	parameterIndex int
+	providers      providers
 }
 
 func (p *functionProvider) getFunction() any {
@@ -84,10 +89,11 @@ func (p *functionProvider) provide(di *Di) (reflect.Value, error) {
 	return p.provideFunc(p, di)
 }
 
-func newFunctionProvider(function any, parameterIndex int) functionProvider {
+func newFunctionProvider(function any, parameterIndex int, providers providers) functionProvider {
 	result := functionProvider{
 		function:       function,
 		parameterIndex: parameterIndex,
+		providers:      providers,
 	}
 	result.provideFunc = func(p iProvider, di *Di) (reflect.Value, error) {
 		if p.getValue().IsValid() {
@@ -101,7 +107,12 @@ func newFunctionProvider(function any, parameterIndex int) functionProvider {
 		if err != nil {
 			return reflect.Value{}, err
 		}
-		di.providers.setFunctionProvidersValues(values)
+
+		// set function result values to providers to prevent the function from being called again
+		if !pf.providers.setFunctionProvidersValues(values) {
+			return reflect.Value{}, fmt.Errorf("values of function '%s' did not set", pf.function)
+		}
+
 		return p.getValue(), nil
 	}
 	return result
