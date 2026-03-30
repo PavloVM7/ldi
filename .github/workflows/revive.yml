@@ -24,6 +24,6 @@ jobs:
       with:
         config: revive.toml
         exclude:
-          - di_test.go
-          - memory_leak_test.go
+          di_test.go
+          memory_leak_test.go
         fail-on-any: true
