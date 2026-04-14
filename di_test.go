@@ -10,6 +10,49 @@ import (
 	"testing"
 )
 
+func TestDi_ClearAll(t *testing.T) {
+	const (
+		parent1ProvidedValue = "test string"
+		parent2ProvidedValue = 123
+	)
+	parent1 := New().MustProvide(parent1ProvidedValue)
+	parent2 := NewWithParent(parent1).MustProvide(parent2ProvidedValue)
+	di := NewWithParent(parent2).MustProvide(GetITest)
+	err := di.Invoke(func(
+		iParam int,
+		ts ITest,
+	) {
+		if iParam != parent2ProvidedValue {
+			t.Fatalf("expected %d, but got %d", parent2ProvidedValue, iParam)
+		}
+		if ts.GetString() != parent1ProvidedValue {
+			t.Fatalf("expected '%s', but got '%s'", parent1ProvidedValue, ts.GetString())
+		}
+	})
+	if err != nil {
+		t.Fatal("unexpected error:", err)
+	}
+	if di.providers.Len() != 1 {
+		t.Fatalf("expected 1 provider, but got %d", di.providers.Len())
+	}
+	if parent1.providers.Len() != 1 {
+		t.Fatalf("expected 1 provider, but got %d", parent1.providers.Len())
+	}
+	if parent2.providers.Len() != 1 {
+		t.Fatalf("expected 1 provider, but got %d", parent2.providers.Len())
+	}
+	di.ClearAll()
+	if di.providers.Len() != 0 {
+		t.Fatalf("expected 0 provider, but got %d", di.providers.Len())
+	}
+	if parent1.providers.Len() != 0 {
+		t.Fatalf("expected 0 provider, but got %d", parent1.providers.Len())
+	}
+	if parent2.providers.Len() != 0 {
+		t.Fatalf("expected 0 provider, but got %d", parent2.providers.Len())
+	}
+}
+
 func TestDi_Invoke_private(t *testing.T) {
 	parent1 := New().MustProvide("private test string")
 	di := NewWithParent(parent1).MustProvide(getIPrivate)
@@ -299,14 +342,12 @@ func TestDi_provide_function_nil(t *testing.T) {
 	di := New()
 	t.Run("provide nil", func(t *testing.T) {
 		err := di.Provide(nil)
-		t.Log("err:", err)
 		if err == nil {
 			t.Fatal("expected error, but got nil")
 		}
 	})
 	t.Run("provide function nil", func(t *testing.T) {
 		err := di.Provide((func() []int)(nil))
-		t.Log("err:", err)
 		if err == nil {
 			t.Fatal("expected error, but got nil")
 		}

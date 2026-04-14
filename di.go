@@ -199,18 +199,14 @@ func (d *Di) provideParameter(di *Di, parameterType reflect.Type, parameterIndex
 	return result, err
 }
 
-func (d *Di) cleanupResolutionTrackingWithParents() {
-	for d.parent != nil {
-		d.parent.cleanupResolutionTrackingWithParents()
-	}
-	d.CleanupResolutionTracking()
-}
-
 // Clear removes all providers and resets the DI container state
 func (d *Di) Clear() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.clearProvidersResolving()
+}
 
+func (d *Di) clearProvidersResolving() {
 	d.providers = make(providers)
 	d.resolving = make(map[reflect.Type]struct{})
 }
@@ -223,6 +219,16 @@ func (d *Di) CleanupResolutionTracking() {
 
 	// Clear all in-flight resolutions
 	d.resolving = make(map[reflect.Type]struct{})
+}
+
+// ClearAll removes all providers and resets the DI container state, including parent containers
+func (d *Di) ClearAll() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.parent != nil {
+		d.parent.ClearAll()
+	}
+	d.clearProvidersResolving()
 }
 
 func (d *Di) canAddProvider(tp reflect.Type) (bool, error) {

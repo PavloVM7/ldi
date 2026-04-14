@@ -14,13 +14,13 @@ __not thread safe__
 ## Usage
 
 ```go
-di := New()
-di.Provide("config value")
-di.Provide(func(cfg string) Database {
-    return NewDatabase(cfg)
-})
+di := New().
+	MustProvide("config value").
+	MustProvide(func(cfg string) Database {
+        return NewDatabase(cfg)
+    })
 
-di.Invoke(func(db Database) {
+err := di.Invoke(func(db Database) {
     // use database
 })
 ```
@@ -32,3 +32,4 @@ For manual cleanup, use:
 
 - `Clear()` - Removes all providers and resets container state
 - `CleanupResolutionTracking()` - Clears resolution tracking entries
+- `ClearAll()` - Removes all providers and resets container state, including parent containers

@@ -29,13 +29,11 @@ func (ps providers) getProvider(tp reflect.Type) (iProvider, bool) {
 }
 
 func (ps providers) addFunction(function any, parameterType reflect.Type, parameterIndex int) error {
-	prov := newFunctionProvider(function, parameterIndex, ps)
-	return ps.addProvider(parameterType, &prov)
+	return ps.addProvider(parameterType, new(newFunctionProvider(function, parameterIndex, ps)))
 }
 
 func (ps providers) addValue(value reflect.Value) error {
-	prov := newValueProvider(value)
-	return ps.addProvider(value.Type(), &prov)
+	return ps.addProvider(value.Type(), new(newValueProvider(value)))
 }
 
 func (ps providers) addProvider(tp reflect.Type, prov iProvider) error {
