@@ -29,8 +29,7 @@ func NewWithParent(parent *Di) *Di {
 type Di struct {
 	providers providers
 	parent    *Di
-	// Use RWMutex for better read/write performance
-	mu sync.RWMutex
+	mu        sync.Mutex
 	// track in-flight provider resolutions to detect circular dependencies
 	resolving map[reflect.Type]struct{}
 }
@@ -157,17 +156,17 @@ func (d *Di) provideParameterAndCheck(di *Di, parameterType reflect.Type, parame
 }
 
 func (d *Di) provideParameter(di *Di, parameterType reflect.Type, parameterIndex int) (reflect.Value, error) {
-	d.mu.RLock()
+	d.mu.Lock()
 
 	if _, resolving := d.resolving[parameterType]; resolving {
-		d.mu.RUnlock()
+		d.mu.Unlock()
 		return reflect.Value{}, fmt.Errorf("circular dependency detected for type '%s'", parameterType)
 	}
 
 	prov, ok := d.providers.getProvider(parameterType)
-	d.mu.RUnlock()
-
 	if !ok {
+		d.mu.Unlock()
+		// Unlock before calling parent to avoid deadlock
 		if d.parent != nil {
 			return d.parent.provideParameter(di, parameterType, parameterIndex)
 		}
@@ -175,12 +174,6 @@ func (d *Di) provideParameter(di *Di, parameterType reflect.Type, parameterIndex
 			parameterIndex, parameterType)
 	}
 
-	d.mu.Lock()
-	// Double-check after acquiring write lock
-	if _, resolving := d.resolving[parameterType]; resolving {
-		d.mu.Unlock()
-		return reflect.Value{}, fmt.Errorf("circular dependency detected for type '%s'", parameterType)
-	}
 	d.resolving[parameterType] = struct{}{}
 	d.mu.Unlock()
 
