@@ -15,8 +15,6 @@ type iProvider interface {
 	provide(di *Di) (reflect.Value, error)
 }
 
-type provideFunction func(iProvider, *Di) (reflect.Value, error)
-
 type providers map[reflect.Type]iProvider
 
 func (ps providers) contains(tp reflect.Type) bool {
@@ -70,7 +68,7 @@ func newProviders() providers {
 }
 
 type functionProvider struct {
-	valueProvider
+	value          reflect.Value
 	function       any
 	parameterIndex int
 	providers      providers
@@ -85,57 +83,42 @@ func (p *functionProvider) getParameterIndex() int {
 }
 
 func (p *functionProvider) provide(di *Di) (reflect.Value, error) {
-	return p.provideFunc(p, di)
+	if p.value.IsValid() {
+		return p.value, nil
+	}
+
+	values, err := di.innerInvoke(p.function)
+	if err != nil {
+		return reflect.Value{}, err
+	}
+
+	// set function result values to providers to prevent the function from being called again
+	if !p.providers.setFunctionProvidersValues(values) {
+		return reflect.Value{}, fmt.Errorf("values of function '%s' did not set", p.function)
+	}
+
+	return p.value, nil
 }
 
 func newFunctionProvider(function any, parameterIndex int, providers providers) functionProvider {
-	result := functionProvider{
+	return functionProvider{
 		function:       function,
 		parameterIndex: parameterIndex,
 		providers:      providers,
 	}
-	result.provideFunc = func(p iProvider, di *Di) (reflect.Value, error) {
-		//revive:disable
-		pf := p.(*functionProvider)
-		//revive:enable
-
-		if pf.value.IsValid() {
-			return pf.value, nil
-		}
-
-		values, err := di.innerInvoke(pf.function)
-		if err != nil {
-			return reflect.Value{}, err
-		}
-
-		// set function result values to providers to prevent the function from being called again
-		if !pf.providers.setFunctionProvidersValues(values) {
-			return reflect.Value{}, fmt.Errorf("values of function '%s' did not set", pf.function)
-		}
-
-		return pf.value, nil
-	}
-	return result
 }
 
 type valueProvider struct {
-	value       reflect.Value
-	provideFunc provideFunction
+	value reflect.Value
 }
 
-func (p *valueProvider) provide(di *Di) (reflect.Value, error) {
-	return p.provideFunc(p, di)
+func (p *valueProvider) provide(_ *Di) (reflect.Value, error) {
+	return p.value, nil
 }
 
 func newValueProvider(value reflect.Value) valueProvider {
 	return valueProvider{
 		value: value,
-		provideFunc: func(p iProvider, _ *Di) (reflect.Value, error) {
-			//revive:disable
-			vp := p.(*valueProvider)
-			//revive:enable
-			return vp.value, nil
-		},
 	}
 }
 
