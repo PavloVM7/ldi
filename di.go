@@ -7,7 +7,6 @@ package ldi
 
 import (
 	"fmt"
-	"log"
 	"reflect"
 	"sync"
 )
@@ -39,9 +38,7 @@ type Di struct {
 // MustInvoke calls the provided functions if there is error it will panic
 func (d *Di) MustInvoke(functions ...any) *Di {
 	if err := d.Invoke(functions...); err != nil {
-		//revive:disable
-		log.Fatal(err)
-		//revive:enable
+		panic(err)
 	}
 	return d
 }
@@ -61,9 +58,7 @@ func (d *Di) Invoke(functions ...any) error {
 // MustProvide adds a new provider for the provided value if there is error it will panic
 func (d *Di) MustProvide(provide any) *Di {
 	if err := d.Provide(provide); err != nil {
-		//revive:disable
-		log.Fatal(err)
-		//revive:enable
+		panic(err)
 	}
 	return d
 }

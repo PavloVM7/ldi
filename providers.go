@@ -9,9 +9,10 @@ import (
 	"reflect"
 )
 
+var errTp = reflect.TypeOf((*error)(nil)).Elem()
+
 type iProvider interface {
 	provide(di *Di) (reflect.Value, error)
-	getValue() reflect.Value
 }
 
 type provideFunction func(iProvider, *Di) (reflect.Value, error)
@@ -94,12 +95,13 @@ func newFunctionProvider(function any, parameterIndex int, providers providers) 
 		providers:      providers,
 	}
 	result.provideFunc = func(p iProvider, di *Di) (reflect.Value, error) {
-		if p.getValue().IsValid() {
-			return p.getValue(), nil
-		}
 		//revive:disable
 		pf := p.(*functionProvider)
 		//revive:enable
+
+		if pf.value.IsValid() {
+			return pf.value, nil
+		}
 
 		values, err := di.innerInvoke(pf.function)
 		if err != nil {
@@ -111,7 +113,7 @@ func newFunctionProvider(function any, parameterIndex int, providers providers) 
 			return reflect.Value{}, fmt.Errorf("values of function '%s' did not set", pf.function)
 		}
 
-		return p.getValue(), nil
+		return pf.value, nil
 	}
 	return result
 }
@@ -119,10 +121,6 @@ func newFunctionProvider(function any, parameterIndex int, providers providers) 
 type valueProvider struct {
 	value       reflect.Value
 	provideFunc provideFunction
-}
-
-func (p *valueProvider) getValue() reflect.Value {
-	return p.value
 }
 
 func (p *valueProvider) provide(di *Di) (reflect.Value, error) {
@@ -133,13 +131,16 @@ func newValueProvider(value reflect.Value) valueProvider {
 	return valueProvider{
 		value: value,
 		provideFunc: func(p iProvider, _ *Di) (reflect.Value, error) {
-			return p.getValue(), nil
+			//revive:disable
+			vp := p.(*valueProvider)
+			//revive:enable
+			return vp.value, nil
 		},
 	}
 }
 
 func isError(tp reflect.Type) bool {
-	return tp.Implements(reflect.TypeOf((*error)(nil)).Elem())
+	return tp.Implements(errTp)
 }
 
 func functionCall(fnc reflect.Value, args []reflect.Value) ([]reflect.Value, error) {
